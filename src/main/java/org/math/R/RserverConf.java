@@ -7,6 +7,7 @@ import java.util.Properties;
 import org.rosuda.REngine.Rserve.RConnection;
 import org.rosuda.REngine.Rserve.RserveException;
 
+
 public class RserverConf {
 
     public static String DEFAULT_RSERVE_HOST = "localhost";
@@ -17,6 +18,8 @@ public class RserverConf {
     public String password;
     //public String RLibPath;
     public Properties properties;
+    
+    
     //public String http_proxy;
 
     public RserverConf(String RserverHostName, int RserverPort, String login, String password, Properties props) {
@@ -181,6 +184,7 @@ public class RserverConf {
         }*/
 
         if (connection != null && connection.isConnected()) {
+        	
             if (properties != null) {
                 for (String p : properties.stringPropertyNames()) {
                     try {
@@ -190,6 +194,7 @@ public class RserverConf {
                     }
                 }
             }
+
 
             /*Special libPath no more used.
             try {

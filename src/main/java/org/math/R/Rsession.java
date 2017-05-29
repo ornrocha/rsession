@@ -21,7 +21,9 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.lang3.ArrayUtils;
 import org.rosuda.REngine.REXP;
 import org.rosuda.REngine.REXPDouble;
 import org.rosuda.REngine.REXPInteger;
@@ -35,8 +37,11 @@ import org.rosuda.REngine.RList;
 import org.rosuda.REngine.Rserve.RConnection;
 import org.rosuda.REngine.Rserve.RserveException;
 
+
 /**
  * @author richet
+ * 
+ * Features added/changed by ornrocha
  */
 public class Rsession implements Logger {
 
@@ -70,6 +75,7 @@ public class Rsession implements Logger {
     String SINK_FILE_BASE = ".Rout";
     String SINK_FILE = null;
     String lastOuput = "";
+    String R_USER_LIBS=null;
 
 
 
@@ -382,6 +388,11 @@ public class Rsession implements Logger {
     public static Rsession newInstanceTry(final Logger console, RserverConf serverconf) {
         return new Rsession(console, serverconf, true);
     }
+    
+    public static Rsession newInstanceTry(final Logger console, RserverConf serverconf, String R_USER_LIBS) {
+        return new Rsession(console, serverconf,R_USER_LIBS,true);
+    }
+
 
     /**
      * Build a new local Rsession
@@ -428,11 +439,30 @@ public class Rsession implements Logger {
      * @param tryLocalRServe local spawned Rsession if given remote one failed
      * to initialized
      */
-    public Rsession(final Logger console, RserverConf serverconf, boolean tryLocalRServe) {
+  /*  public Rsession(final Logger console, RserverConf serverconf, boolean tryLocalRServe) {
         this.console = console;
         RserveConf = serverconf;
         this.tryLocalRServe = tryLocalRServe;
 
+        loggers = new LinkedList<Logger>();
+        loggers.add(console);
+
+        // Make sink file specific to current Rserve instance
+        SINK_FILE = SINK_FILE_BASE + "-" + (serverconf==null ? 0 : serverconf.port);
+
+        startup();
+    }*/
+    
+    public Rsession(final Logger console, RserverConf serverconf, boolean tryLocalRServe) {
+    	this(console, serverconf, null, tryLocalRServe);
+    }
+
+    public Rsession(final Logger console, RserverConf serverconf,String R_USER_LIBS, boolean tryLocalRServe) {
+        this.console = console;
+        RserveConf = serverconf;
+        this.tryLocalRServe = tryLocalRServe;
+        this.R_USER_LIBS=validatePath(R_USER_LIBS);
+        //System.out.println("R_USER_PATH: "+this.R_USER_LIBS);
         loggers = new LinkedList<Logger>();
         loggers.add(console);
 
@@ -524,7 +554,12 @@ public class Rsession implements Logger {
             RserveConf = RserverConf.newLocalInstance(RserveConf.properties);
             println("Trying to spawn " + RserveConf.toString(), Level.INFO);
 
-            localRserve = new Rdaemon(RserveConf, this);
+            if(R_USER_LIBS!=null)
+            	localRserve = new Rdaemon(RserveConf, this, null, R_USER_LIBS);
+            else
+            	localRserve = new Rdaemon(RserveConf, this);
+            
+            
             String http_proxy = null;
             if (RserveConf != null && RserveConf.properties != null && RserveConf.properties.containsKey("http_proxy")) {
                 http_proxy = RserveConf.properties.getProperty("http_proxy");
@@ -557,6 +592,22 @@ public class Rsession implements Logger {
 
     }
     //RSession previous;
+    
+    
+    public static String validatePath(String path){
+    	String newpath=null;
+    	if(System.getProperty("os.name").contains("Win")){
+    		if(path.contains(File.separator))
+    			newpath=path.replace(File.separator, "/");
+    		else if(path.contains("\\\\"))
+    			newpath=path.replace("\\\\", "/");
+
+    	}
+    	
+    	if(newpath==null)
+    		newpath=path;
+    	return newpath;
+    }
 
     /**
      * correctly (depending on execution platform) shutdown Rsession.
@@ -638,6 +689,7 @@ public class Rsession implements Logger {
     }
     // <editor-fold defaultstate="collapsed" desc="Packages management">
     public static String DEFAULT_REPOS = "http://cran.irsn.fr/";
+   // public static String DEFAULT_REPOS = "http://cran.us.r-project.org";
     public String repos = DEFAULT_REPOS;
 
     /**
@@ -692,6 +744,7 @@ public class Rsession implements Logger {
      * @return package loading status
      */
     public boolean isPackageInstalled(String pack, String version) {
+
         silentlyVoidEval(packs + "<-installed.packages(noCache=TRUE)", false);
         boolean isinstalled = false;
         REXP r = silentlyEval("is.element(set=" + packs + "[,1],el='" + pack + "')");
@@ -728,6 +781,7 @@ public class Rsession implements Logger {
             }
 
         }
+        
         //silentlyEval("rm(" + packs + ")");
         return isinstalled;
     }
@@ -769,7 +823,12 @@ public class Rsession implements Logger {
      */
     public String installPackage(File pack, boolean load) {
         sendFile(pack);
-        eval("install.packages('" + pack.getName() + "',repos=NULL" );
+        if(R_USER_LIBS!=null){
+        	eval(".libPaths('"+R_USER_LIBS+"')");
+        	eval("install.packages('" + pack.getName() + "',repos=NULL, lib='"+R_USER_LIBS+"', dependencies=c('Depends','Imports','LinkingTo'))");
+        }
+        else
+        	eval("install.packages('" + pack.getName() + "',repos=NULL" );
         log("  request package " + pack + " install...", Level.INFO);
 
         String name = pack.getName();
@@ -808,6 +867,9 @@ public class Rsession implements Logger {
      */
     public String installPackage(final String pack, File dir, boolean load) {
         log("  trying to load package " + pack, Level.INFO);
+        
+        if(R_USER_LIBS!=null)
+        	eval(".libPaths('"+R_USER_LIBS+"')");
 
         if (isPackageInstalled(pack, null)) {
             log(_PACKAGE_ + pack + " already installed.", Level.INFO);
@@ -847,7 +909,11 @@ public class Rsession implements Logger {
         }
 
         sendFile(pack_files[0]);
-        eval("install.packages('" + pack_files[0].getName() + "',repos=NULL)", TRY_MODE);
+        if(R_USER_LIBS!=null)
+        	eval("install.packages('" + pack_files[0].getName() + "',repos=NULL, lib='"+R_USER_LIBS+"', dependencies=c('Depends','Imports','LinkingTo'))");
+		
+		else
+        	eval("install.packages('" + pack_files[0].getName() + "',repos=NULL)", TRY_MODE);
         log("  request package " + pack + " install...", Level.INFO);
 
         if (isPackageInstalled(pack, null)) {
@@ -867,6 +933,17 @@ public class Rsession implements Logger {
         }
     }
 
+ /*   public void printRlibs(){
+    	 try {
+ 			String[] res=eval(".libPaths()").asStrings();
+ 			ArrayList<String> l=new ArrayList<>(Arrays.asList(res));
+ 			System.out.println(l);
+ 		} catch (REXPMismatchException e) {
+ 			// TODO Auto-generated catch block
+ 			e.printStackTrace();
+ 		}
+    }
+    */
     /**
      * Start installation procedure of CRAN R package
      *
@@ -876,6 +953,10 @@ public class Rsession implements Logger {
      */
     public String installPackage(String pack, boolean load) {
         log("  trying to load package " + pack, Level.INFO);
+        
+
+        if(R_USER_LIBS!=null)
+        	eval(".libPaths('"+R_USER_LIBS+"')");
 
         if (isPackageInstalled(pack, null)) {
             log(_PACKAGE_ + pack + " already installed.", Level.INFO);
@@ -892,9 +973,27 @@ public class Rsession implements Logger {
          log("  package " + pack + " not accessible on " + repos + ": CRAN unreachable.");
          return "Impossible to get package " + pack + " from " + repos;
          }*/
-        eval("install.packages('" + pack + "',repos='" + repos + "')", TRY_MODE);
+        if(R_USER_LIBS!=null){
+        	String rcmd=Rdaemon.getBinaryPathToR()+(System.getProperty("os.name").contains("Win") ? ".exe" : "");
+        	
+        	boolean packagestate=StartRserve.installPackageCommandLine(pack, rcmd, null, repos, R_USER_LIBS,console);
+        	
+        	if(packagestate){
+        		log(_PACKAGE_ + pack + " installation sucessfull.", Level.INFO);
+                if (load) {
+                    return loadPackage(pack);
+                } else {
+                    return PACKAGEINSTALLED;
+                }
+        	}
+        }
+        else
+        	eval("install.packages('" + pack + "',repos='" + repos + "')", TRY_MODE);
+        
         log("  request package " + pack + " install...", Level.INFO);
 
+      //printRlibs();
+        
         if (isPackageInstalled(pack, null)) {
             log(_PACKAGE_ + pack + " installation sucessfull.", Level.INFO);
             if (load) {
@@ -921,7 +1020,14 @@ public class Rsession implements Logger {
     public String loadPackage(String pack) {
         log("  request package " + pack + " loading...", Level.INFO);
         try {
-            boolean ok = eval("library(" + pack + ",logical.return=T,quietly=T,verbose=F)", TRY_MODE).asBytes()[0] == 1;
+        	boolean ok =false;
+        	if(R_USER_LIBS!=null){
+        		ok = eval("library(" + pack + ", lib.loc='"+R_USER_LIBS+"' ,logical.return=T,quietly=T,verbose=F)", TRY_MODE).asBytes()[0] == 1;
+        	}
+        	if(!ok)
+        		ok = eval("library(" + pack + ",logical.return=T,quietly=T,verbose=T)", TRY_MODE).asBytes()[0] == 1;
+
+        	
             if (ok) {
                 log(_PACKAGE_ + pack + " loading sucessfull.", Level.INFO);
                 return PACKAGELOADED;
@@ -1544,7 +1650,7 @@ public class Rsession implements Logger {
      * @param varname R object name
      * @param var R object value
      */
-    public boolean set(String varname, Object var) {
+  /*  public boolean set(String varname, Object var) {
         //assert connected : "R environment not initialized. Please make sure that R.init() method was called first.";
         if (!connected) {
             log(HEAD_EXCEPTION + "R environment not initialized. Please make sure that R.init() method was called first.", Level.ERROR);
@@ -1552,14 +1658,14 @@ public class Rsession implements Logger {
         }
 
         log(HEAD_SET + varname + " <- " + var, Level.INFO);
-        /*if (var instanceof DataFrame) {
+        if (var instanceof DataFrame) {
          DataFrame df = (DataFrame) var;
          set("names_" + varname, df.keySet().toArray(new String[]{}));
          set("data_" + varname, df.dataSet());
          eval(varname + "=data.frame(x=data_" + varname + ")");
          silentlyEval("names(" + varname + ") <- names_" + varname);
          silentlyEval("rm(names_" + varname + ",data_" + varname + ")");
-         }*/
+         }
         if (var == null) {
             rm(varname);
             return true;
@@ -1592,7 +1698,7 @@ public class Rsession implements Logger {
                 log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (Double[]) var)", Level.ERROR);
                 return false;
             }
-            return silentlyVoidEval(varname/*, cat((double[]) var)*/);
+            return silentlyVoidEval(varname, cat((double[]) var));
         } else if (var instanceof double[]) {
             try {
                 synchronized (connection) {
@@ -1602,7 +1708,7 @@ public class Rsession implements Logger {
                 log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (double[]) var)", Level.ERROR);
                 return false;
             }
-            return silentlyVoidEval(varname/*, cat((double[]) var)*/);
+            return silentlyVoidEval(varname, cat((double[]) var));
         } else if (var instanceof Double[][]) {
             Double[][] array = (Double[][]) var;
             int rows = array.length;
@@ -1642,7 +1748,7 @@ public class Rsession implements Logger {
                 log(HEAD_EXCEPTION + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (String) var)", Level.ERROR);
                 return false;
             }
-            return silentlyVoidEval(varname/*, (String) var*/);
+            return silentlyVoidEval(varname, (String) var);
         } else if (var instanceof String[]) {
             try {
                 synchronized (connection) {
@@ -1652,7 +1758,7 @@ public class Rsession implements Logger {
                 log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (String[]) var)", Level.ERROR);
                 return false;
             }
-            return silentlyVoidEval(varname/*, cat((String[]) var)*/);
+            return silentlyVoidEval(varname, cat((String[]) var));
         } else if (var instanceof Map) {
             try {
                 synchronized (connection) {
@@ -1667,7 +1773,222 @@ public class Rsession implements Logger {
             throw new IllegalArgumentException("Variable " + varname + " is not double, double[],  double[][], String or String[]. R engine can not handle.");
         }
         return true;
+    }*/
+    
+    /**
+     * Set R object in R env.
+     *
+     * @param varname R object name
+     * @param var R object value
+     */
+    public boolean set(String varname, Object var) {
+        //assert connected : "R environment not initialized. Please make sure that R.init() method was called first.";
+        if (!connected) {
+            log(HEAD_EXCEPTION + "R environment not initialized. Please make sure that R.init() method was called first.", Level.ERROR);
+            return false;
+        }
+
+        log(HEAD_SET + varname + " <- " + var, Level.INFO);
+
+        if (var == null) {
+            rm(varname);
+            return true;
+        } else if (var instanceof RList) {
+            RList l = (RList) var;
+            try {
+                synchronized (connection) {
+                    connection.assign(varname, new REXPList(l));
+                }
+            } catch (RserveException ex) {
+                log(HEAD_EXCEPTION + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (RList) var)", Level.ERROR);
+                return false;
+            }
+        } else if (var instanceof File) {
+            sendFile((File) var);
+            return silentlyVoidEval(varname + "<-'" + ((File) var).getName() + "'");
+        } else if (var instanceof Integer) {
+            return silentlyVoidEval(varname + "<-" + (Integer) var);
+        } else if (var instanceof Double) {
+            return silentlyVoidEval(varname + "<-" + (Double) var);
+        } else if (var instanceof Double[]) {
+            double[] vard =ArrayUtils.toPrimitive((Double[]) var);
+            try {
+                synchronized (connection) {
+                    connection.assign(varname, vard);
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (Double[]) var)", Level.ERROR);
+                return false;
+            }
+            return silentlyVoidEval(varname/*, cat((double[]) var)*/);
+        } else if (var instanceof double[]) {
+            try {
+                synchronized (connection) {
+                    connection.assign(varname, (double[]) var);
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (double[]) var)", Level.ERROR);
+                return false;
+            }
+            return silentlyVoidEval(varname/*, cat((double[]) var)*/);
+        } else if (var instanceof Double[][]) {
+            Double[][] array = (Double[][]) var;
+            int rows = array.length;
+            int col = array[0].length;
+            try {
+                synchronized (connection) {
+                    connection.assign("row_" + varname, reshapeAsRow(array));
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (double[][]) var)", Level.ERROR);
+                return false;
+            }
+            boolean done = silentlyVoidEval(varname + "<-array(row_" + varname + ",c(" + rows + "," + col + "))");
+            return done && silentlyVoidEval("rm(row_" + varname + ")");
+        } else if (var instanceof double[][]) {
+            double[][] array = (double[][]) var;
+            int rows = array.length;
+            int col = array[0].length;
+            try {
+                synchronized (connection) {
+                    connection.assign("row_" + varname, reshapeAsRow(array));
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (double[][]) var)", Level.ERROR);
+                return false;
+            }
+ 
+            boolean done = silentlyVoidEval(varname + "<-array(row_" + varname + ",c(" + rows + "," + col + "))");
+            return done && silentlyVoidEval("rm(row_" + varname + ")");
+        } else if (var instanceof Integer[][]) {
+            Integer[][] array = (Integer[][]) var;
+            int rows = array.length;
+            int col = array[0].length;
+            try {
+                synchronized (connection) {
+                    connection.assign("row_" + varname, reshapeAsRow(array));
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (int[][]) var)", Level.ERROR);
+                return false;
+            }
+            boolean done = silentlyVoidEval(varname + "<-array(row_" + varname + ",c(" + rows + "," + col + "))");
+            return done && silentlyVoidEval("rm(row_" + varname + ")");
+        }else if (var instanceof int[][]) {
+            int[][] array = (int[][]) var;
+            int rows = array.length;
+            int col = array[0].length;
+            try {
+                synchronized (connection) {
+                    connection.assign("row_" + varname, reshapeAsRow(array));
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (int[][]) var)", Level.ERROR);
+                return false;
+            }
+            boolean done = silentlyVoidEval(varname + "<-array(row_" + varname + ",c(" + rows + "," + col + "))");
+            return done && silentlyVoidEval("rm(row_" + varname + ")");
+        }
+        else if (var instanceof String[][]) {
+            String[][] array = (String[][]) var;
+            int rows = array.length;
+            int col = array[0].length;
+            try {
+                synchronized (connection) {
+                    connection.assign("row_" + varname, reshapeAsRow(array));
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (int[][]) var)", Level.ERROR);
+                return false;
+            }
+            boolean done = silentlyVoidEval(varname + "<-array(row_" + varname + ",c(" + rows + "," + col + "))");
+            return done && silentlyVoidEval("rm(row_" + varname + ")");
+        }
+        else if (var instanceof String) {
+            try {
+                synchronized (connection) {
+                    connection.assign(varname, (String) var);
+                }
+            } catch (RserveException ex) {
+                log(HEAD_EXCEPTION + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (String) var)", Level.ERROR);
+                return false;
+            }
+            return silentlyVoidEval(varname/*, (String) var*/);
+        } else if (var instanceof String[]) {
+            try {
+                synchronized (connection) {
+                    connection.assign(varname, (String[]) var);
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (String[]) var)", Level.ERROR);
+                return false;
+            }
+            return silentlyVoidEval(varname/*, cat((String[]) var)*/);
+        }
+        else if(var instanceof int[]){
+        	 try {
+                 synchronized (connection) {
+                     connection.assign(varname, (int[])var);
+                 }
+             } catch (REngineException ex) {
+                 log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (int[]) var)", Level.ERROR);
+                 return false;
+             }
+        	 return silentlyVoidEval(varname);
+        }
+        else if(var instanceof Integer[]){
+        	int[] varint=ArrayUtils.toPrimitive((Integer[])var);
+        	try {
+                synchronized (connection) {
+                    connection.assign(varname, varint);
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (int[]) var)", Level.ERROR);
+                return false;
+            }
+       	 return silentlyVoidEval(varname);		
+        }
+        else if(var instanceof boolean[]){
+        	REXPLogical logic=new REXPLogical((boolean[])var);
+        	try {
+                synchronized (connection) {
+                    connection.assign(varname, logic);
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (boolean[]) var)", Level.ERROR);
+                return false;
+            }
+       	 return silentlyVoidEval(varname);		
+        }
+        else if(var instanceof Boolean[]){
+        	boolean[] lo=ArrayUtils.toPrimitive((Boolean[])var);
+        	REXPLogical logic=new REXPLogical(lo);
+        	try {
+                synchronized (connection) {
+                    connection.assign(varname, logic);
+                }
+            } catch (REngineException ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (int[]) var)", Level.ERROR);
+                return false;
+            }
+       	 return silentlyVoidEval(varname);		
+        }
+        else if (var instanceof Map) {
+            try {
+                synchronized (connection) {
+                    connection.assign(varname, asRList((Map) var));
+                }
+            } catch (Exception ex) {
+                log(HEAD_ERROR + ex.getMessage() + "\n  set(String varname=" + varname + ",Object (Map) var)", Level.ERROR);
+                return false;
+            }
+            return silentlyVoidEval(varname);
+        } else {
+            throw new IllegalArgumentException("Variable " + varname + " is not double, double[],  double[][], String or String[]. R engine can not handle.");
+        }
+        return true;
     }
+    
 
     public static REXPList asRList(Map m) {
         RList l = new RList();
@@ -1716,6 +2037,42 @@ public class Rsession implements Logger {
 
     private static double[] reshapeAsRow(Double[][] a) {
         double[] reshaped = new double[a.length * a[0].length];
+        int ir = 0;
+        for (int j = 0; j < a[0].length; j++) {
+            for (int i = 0; i < a.length; i++) {
+                reshaped[ir] = a[i][j];
+                ir++;
+            }
+        }
+        return reshaped;
+    }
+    
+    public static int[] reshapeAsRow(Integer[][] a) {
+        int[] reshaped = new int[a.length * a[0].length];
+        int ir = 0;
+        for (int j = 0; j < a[0].length; j++) {
+            for (int i = 0; i < a.length; i++) {
+                reshaped[ir] = a[i][j];
+                ir++;
+            }
+        }
+        return reshaped;
+    }
+    
+    public static int[] reshapeAsRow(int[][] a) {
+        int[] reshaped = new int[a.length * a[0].length];
+        int ir = 0;
+        for (int j = 0; j < a[0].length; j++) {
+            for (int i = 0; i < a.length; i++) {
+                reshaped[ir] = a[i][j];
+                ir++;
+            }
+        }
+        return reshaped;
+    }
+    
+    public static String[] reshapeAsRow(String[][] a) {
+        String[] reshaped = new String[a.length * a[0].length];
         int ir = 0;
         for (int j = 0; j < a[0].length; j++) {
             for (int i = 0; i < a.length; i++) {

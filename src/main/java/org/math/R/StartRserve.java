@@ -8,6 +8,12 @@ import java.io.InputStreamReader;
 
 import org.rosuda.REngine.Rserve.RConnection;
 
+/**
+ * @author richet
+ * 
+ * Features added/changed by ornrocha
+ */
+
 /** helper class that consumes output of a process. In addition, it filter output of the REG command on Windows to look for InstallPath registry entry which specifies the location of R. */
 class RegistryHog extends Thread {
 
@@ -132,20 +138,46 @@ public class StartRserve {
             return false;
         }
     }
+    
+    public static boolean isRserveInstalled(String Rcmd,String R_USER_LIBS) {
+        StringBuffer result = new StringBuffer();
+        String sep="'";
+        boolean done = doInR(".libPaths("+sep+R_USER_LIBS+sep+");i=installed.packages();is.element(set=i,el='Rserve')", Rcmd, "--vanilla -q", result, result);
+        
+        System.out.println("RServe installed: "+result.toString());
+        if (!done) {
+            return false;
+        }
+        //System.err.println("output=\n===========\n" + result.toString() + "\n===========\n");
+        if (result.toString().contains("TRUE")) {
+            return true;
+        } else {
+            return false;
+        }
+    }
 
     /** R batch to install Rserve
      * @param Rcmd command necessary to start R
      * @param http_proxy http://login:password@proxy:port string to enable internet access to rforge server
      * @return success
      */
-    public static boolean installRserve(String Rcmd, String http_proxy, String repository) {
+    public static boolean installRserve(String Rcmd, String http_proxy, String repository,String R_USER_LIBS) {
         if (repository == null || repository.length() == 0) {
             repository = Rsession.DEFAULT_REPOS;
         }
+        
         System.err.print("Install Rserve from " + repository + " ... (http_proxy=" + http_proxy + ") ");
-        boolean ok = doInR((http_proxy != null ? "Sys.setenv(http_proxy=" + http_proxy + ");" : "") + "install.packages('Rserve',repos='" + repository + "')", Rcmd, "--vanilla", null, null);
+        boolean ok =false;
+        
+        if(R_USER_LIBS!=null)
+        	//ok=doInR(".libPaths("+sep+R_USER_LIBS+sep+");install.packages('Rserve',repos='" + repository + "')", Rcmd, "--vanilla", null, null);
+        	ok=doInR((".libPaths('"+R_USER_LIBS+"');install.packages('Rserve',repos='" + repository + "' , lib='"+R_USER_LIBS+"')"), Rcmd, "--vanilla", null, null);
+        else
+        	ok = doInR((http_proxy != null ? "Sys.setenv(http_proxy=" + http_proxy + ");" : "") + "install.packages('Rserve',repos='" + repository + "')", Rcmd, "--vanilla", null, null);
+       
+        
         if (!ok) {
-            System.err.println("failed");
+            System.err.println("state: failed");
             return false;
         }
         int n = 5;
@@ -155,16 +187,64 @@ public class StartRserve {
                 System.err.print(".");
             } catch (InterruptedException ex) {
             }
-            if (isRserveInstalled(Rcmd)) {
-                System.err.println("ok");
+            if(R_USER_LIBS!=null && isRserveInstalled(Rcmd, R_USER_LIBS)){
+            	System.out.println("loaded from R user library, state: ok");
+                return true;
+            }
+            else if (isRserveInstalled(Rcmd)) {
+                System.out.println("loaded from R library, state: ok");
                 return true;
             }
             n--;
         }
-        System.err.println("failed");
+        System.err.println("state: failed");
         return false;
     }
+    
+    
+    public static boolean installPackageCommandLine(String packagename, String Rcmd, String http_proxy, String repository,String R_USER_LIBS, Logger console){
+    	 if (repository == null || repository.length() == 0) {
+             repository = Rsession.DEFAULT_REPOS;
+         }
+         
+         System.out.println("Install Rserve from " + repository + " ... (http_proxy=" + http_proxy + ") ");
+         boolean ok =false;
+         
+         if(R_USER_LIBS!=null)
+         	//ok=doInR(".libPaths("+sep+R_USER_LIBS+sep+");install.packages('Rserve',repos='" + repository + "')", Rcmd, "--vanilla", null, null);
+         	ok=doInR((".libPaths('"+R_USER_LIBS+"');install.packages('"+packagename+"',repos='" + repository + "' , lib='"+R_USER_LIBS+"')"), Rcmd, "--vanilla",console);
+         else
+         	ok = doInR((http_proxy != null ? "Sys.setenv(http_proxy=" + http_proxy + ");" : "") + "install.packages('Rserve',repos='" + repository + "')", Rcmd, "--vanilla",console);
+         
+         
+         if(!ok)
+        	 return false;
+         
+         else{
+        	 
 
+        	 boolean done =false;
+        	 if(R_USER_LIBS!=null)
+        		 done = doInR(".libPaths('"+R_USER_LIBS+"');i=installed.packages();is.element(set=i,el='"+packagename+"')", Rcmd, "--vanilla -q",console);
+        	 else
+        		 done= doInR("i=installed.packages();is.element(set=i,el='"+packagename+"')", Rcmd, "--vanilla -q",console);
+         
+        	 //System.out.println("DONE :"+done);
+        	 if (!done) {
+        		 return false;
+        	 }
+        	 
+        	 return true;
+         //System.err.println("output=\n===========\n" + result.toString() + "\n===========\n");
+        	 /*if (result.toString().contains("TRUE")) {
+        		 return true;
+        	 } else {
+        		 return false;
+        	 }*/
+         }
+        
+    }
+    
     /** attempt to start Rserve. Note: parameters are <b>not</b> quoted, so avoid using any quotes in arguments
     @param todo command to execute in R
     @param Rcmd command necessary to start R
@@ -189,21 +269,69 @@ public class StartRserve {
             // we need to fetch the output - some platforms will die if you don't ...
             StreamHog error = new StreamHog(p.getErrorStream(), (err != null));
             StreamHog output = new StreamHog(p.getInputStream(), (out != null));
+          
+
             if (err != null) {
                 error.join();
             }
             if (out != null) {
                 output.join();
             }
-            if (!isWindows) /* on Windows the process will never return, so we cannot wait */ {
+            if (!isWindows) /* on Windows the process will never return, so we cannot wait*/  {
                 p.waitFor();
             }
+
             if (out != null) {
                 out.append(output.getOutput());
             }
             if (err != null) {
                 err.append(error.getOutput());
             }
+            
+        } catch (Exception x) {
+            return false;
+        }
+        return true;
+    }
+    
+    
+
+    /** attempt to start Rserve. Note: parameters are <b>not</b> quoted, so avoid using any quotes in arguments
+    @param todo command to execute in R
+    @param Rcmd command necessary to start R
+    @param rargs arguments are are to be passed to R (e.g. --vanilla -q)
+    @return <code>true</code> if Rserve is running or was successfully started, <code>false</code> otherwise.
+     */
+    public static boolean doInR(String todo, String Rcmd, String rargs, Logger console) {
+        try {
+            Process p;
+           // boolean isWindows = false;
+            String osname = System.getProperty("os.name");
+            String command = null;
+            if (osname != null && osname.length() >= 7 && osname.substring(0, 7).equals("Windows")) {
+                //isWindows = true; /* Windows startup */
+                command = "\"" + Rcmd + "\" -e \"" + todo + "\" " + rargs;
+                p = Runtime.getRuntime().exec(command);
+            } else /* unix startup */ {
+                command = "echo \"" + todo + "\"|" + Rcmd + " " + rargs;
+                p = Runtime.getRuntime().exec(new String[]{"/bin/sh", "-c", command});
+            }
+            System.out.println("  executing " + command);
+            // we need to fetch the output - some platforms will die if you don't ...
+           /* StreamHog error = new StreamHog(p.getErrorStream(), (err != null));
+            StreamHog output = new StreamHog(p.getInputStream(), (out != null));*/
+           
+            
+            SimpleCmdChecker checker=new SimpleCmdChecker(p.getInputStream(),console);
+	    	Thread stdout=new Thread(checker);
+	    	stdout.start();
+	    	
+            int t=p.waitFor();
+            if(t==0)
+            	System.out.println("process executed with success");
+            else
+            	System.err.println("process executed without success");
+  
         } catch (Exception x) {
             return false;
         }
@@ -212,7 +340,11 @@ public class StartRserve {
 
     /** shortcut to <code>launchRserve(cmd, "--no-save --slave", "--no-save --slave", false)</code> */
     public static boolean launchRserve(String cmd) {
-        return launchRserve(cmd, /*null,*/ "--no-save --slave", "--no-save --slave", false);
+        return launchRserve(cmd, /*null,*/ "--no-save --slave", "--no-save --slave", false,null);
+    }
+    
+    public static boolean launchRserve(String cmd,String R_USER_LIBS) {
+        return launchRserve(cmd, /*null,*/ "--no-save --slave", "--no-save --slave", false, R_USER_LIBS);
     }
 
     /** attempt to start Rserve. Note: parameters are <b>not</b> quoted, so avoid using any quotes in arguments
@@ -221,9 +353,19 @@ public class StartRserve {
     @param rsrvargs arguments to be passed to Rserve
     @return <code>true</code> if Rserve is running or was successfully started, <code>false</code> otherwise.
      */
-    public static boolean launchRserve(String cmd, /*String libloc,*/ String rargs, String rsrvargs, boolean debug) {
+    public static boolean launchRserve(String cmd, /*String libloc,*/ String rargs, String rsrvargs, boolean debug, String R_USER_LIBS) {
         System.err.println("Waiting for Rserve to start ...");
-        boolean startRserve = doInR("library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null);
+        
+
+        String sep="'";
+        boolean startRserve =false;
+        
+        if(R_USER_LIBS!=null)
+        	startRserve =doInR(".libPaths("+sep+R_USER_LIBS+sep+");library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null);
+        else
+        	startRserve =doInR("library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null);
+        
+        //boolean startRserve = doInR("library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null);
         if (startRserve) {
             System.err.println("Rserve startup done, let us try to connect ...");
         } else {
