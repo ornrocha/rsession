@@ -21,7 +21,6 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.rosuda.REngine.REXP;
@@ -75,7 +74,7 @@ public class Rsession implements Logger {
     String SINK_FILE_BASE = ".Rout";
     String SINK_FILE = null;
     String lastOuput = "";
-    String R_USER_LIBS=null;
+    public String R_USER_LIBS=null;
 
 
 
@@ -461,8 +460,9 @@ public class Rsession implements Logger {
         this.console = console;
         RserveConf = serverconf;
         this.tryLocalRServe = tryLocalRServe;
-        this.R_USER_LIBS=validatePath(R_USER_LIBS);
-        //System.out.println("R_USER_PATH: "+this.R_USER_LIBS);
+        if(R_USER_LIBS!=null)
+        	this.R_USER_LIBS=validatePath(R_USER_LIBS);
+   
         loggers = new LinkedList<Logger>();
         loggers.add(console);
 
@@ -718,7 +718,8 @@ public class Rsession implements Logger {
         silentlyVoidEval(loadedpacks + "<-.packages()", false);
         boolean isloaded = false;
         try {
-            REXP i = silentlyEval("is.element(set=" + loadedpacks + "[,1],el='" + pack + "')");
+            //REXP i = silentlyEval("is.element(set=" + loadedpacks + "[,1],el='" + pack + "')");
+            REXP i = silentlyEval("any("+loadedpacks+"=='" + pack + "')");
             if (i != null) {
                 isloaded = i.asInteger() == 1;
             }
@@ -1022,8 +1023,10 @@ public class Rsession implements Logger {
         try {
         	boolean ok =false;
         	if(R_USER_LIBS!=null){
+        		eval(".libPaths('"+R_USER_LIBS+"')");
         		ok = eval("library(" + pack + ", lib.loc='"+R_USER_LIBS+"' ,logical.return=T,quietly=T,verbose=F)", TRY_MODE).asBytes()[0] == 1;
         	}
+        	
         	if(!ok)
         		ok = eval("library(" + pack + ",logical.return=T,quietly=T,verbose=T)", TRY_MODE).asBytes()[0] == 1;
 
