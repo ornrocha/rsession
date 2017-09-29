@@ -25,6 +25,7 @@ import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.rosuda.REngine.REXP;
 import org.rosuda.REngine.REXPDouble;
+import org.rosuda.REngine.REXPGenericVector;
 import org.rosuda.REngine.REXPInteger;
 import org.rosuda.REngine.REXPList;
 import org.rosuda.REngine.REXPLogical;
@@ -75,7 +76,7 @@ public class Rsession implements Logger {
     String SINK_FILE = null;
     String lastOuput = "";
     public String R_USER_LIBS=null;
-
+    public int winconnectiontries=10;
 
 
     void cleanupListeners() {
@@ -576,11 +577,31 @@ public class Rsession implements Logger {
             connected = (connection != null);
 
             if (!connected) {//failed !
-
+               
+            	 /*if (System.getProperty("os.name").contains("Win")) {
+            		 int port=6311;
+            		 int tryys=0;
+            		 while (!connected && tryys!=winconnectiontries) {
+            			 port++;
+            			 RserveConf =new RserverConf(RserverConf.DEFAULT_RSERVE_HOST, port, null, null, null);
+					
+            			 if(R_USER_LIBS!=null)
+            	            	localRserve = new Rdaemon(RserveConf, this, null, R_USER_LIBS);
+            	            else
+            	            	localRserve = new Rdaemon(RserveConf, this);
+            			 localRserve.start(null);
+            			 connection = RserveConf.connect();
+            	         connected = (connection != null);
+            	         tryys++;
+            		 }
+            	 }*/
+            	
+            	
                 String message2 = "Failed to launch local Rserve. Unable to initialize Rsession.";
                 println(message2, Level.ERROR);
                 System.err.println(message2);
                 throw new IllegalArgumentException(message2);
+                
             } else {
                 println("Local Rserve started. (Version " + connection.getServerVersion() + ")", Level.INFO);
             }
@@ -618,7 +639,8 @@ public class Rsession implements Logger {
             cleanupListeners();
             return;
         }
-        if ((!System.getProperty("os.name").contains("Win")) && localRserve != null) {//if ((!UNIX_OPTIMIZE || System.getProperty("os.name").contains("Win")) && localRserve != null) {
+        //if ((!System.getProperty("os.name").contains("Win")) && localRserve != null) {
+        if (localRserve != null) {//if ((!UNIX_OPTIMIZE || System.getProperty("os.name").contains("Win")) && localRserve != null) {
             log("Ending local session...", Level.INFO);
             localRserve.stop();
             connection.close();
@@ -626,6 +648,7 @@ public class Rsession implements Logger {
             log("Ending remote session...", Level.INFO);
             connection.close();
         }
+       
 
         log("Session teminated.", Level.INFO);
 

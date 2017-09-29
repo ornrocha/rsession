@@ -40,6 +40,7 @@ public class Rdaemon {
     
     public static String Bit64="b64";
 	public static String Bit32="b32";
+	private WinRserveProcFollower pfollow;
     
     static {
         boolean app_dir_ok = false;
@@ -379,6 +380,9 @@ public class Rdaemon {
             }
             s.shutdown();
             
+            if(pfollow!=null)
+            	pfollow.killProcessRecursively();
+            
         } catch (Exception ex) {
         	log.println(ex.getMessage(), Level.ERROR);
         }
@@ -441,8 +445,10 @@ public class Rdaemon {
             RserveArgs.append(" --RS-port " + conf.port);
         }
         
+        if (System.getProperty("os.name").contains("Win"))
+        	pfollow=new WinRserveProcFollower();
         //boolean started = StartRserve.launchRserve(R_HOME + File.separator + "bin" + File.separator + "R" + (System.getProperty("os.name").contains("Win") ? ".exe" : ""), /*Rserve_HOME + "\\\\..", */ "--no-save --slave", RserveArgs.toString(), false, R_USER_LIBS);
-        boolean started = StartRserve.launchRserve(rcmd, /*Rserve_HOME + "\\\\..", */ "--no-save --slave", RserveArgs.toString(), false, R_USER_LIBS);
+        boolean started = StartRserve.launchRserve(rcmd, /*Rserve_HOME + "\\\\..", */ "--no-save --slave", RserveArgs.toString(), false, R_USER_LIBS,pfollow);
         
         if (started) {
         	log.println("  ok", Level.INFO);

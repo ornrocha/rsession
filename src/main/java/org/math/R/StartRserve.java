@@ -245,13 +245,19 @@ public class StartRserve {
         
     }
     
+    
+    public static boolean doInR(String todo, String Rcmd, String rargs, StringBuffer out, StringBuffer err) {
+    	return doInR(todo, Rcmd, rargs, out, err, null);
+    }
+    
+    
     /** attempt to start Rserve. Note: parameters are <b>not</b> quoted, so avoid using any quotes in arguments
     @param todo command to execute in R
     @param Rcmd command necessary to start R
     @param rargs arguments are are to be passed to R (e.g. --vanilla -q)
     @return <code>true</code> if Rserve is running or was successfully started, <code>false</code> otherwise.
      */
-    public static boolean doInR(String todo, String Rcmd, String rargs, StringBuffer out, StringBuffer err) {
+    public static boolean doInR(String todo, String Rcmd, String rargs, StringBuffer out, StringBuffer err, WinRserveProcFollower rservefollower) {
         try {
             Process p;
             boolean isWindows = false;
@@ -270,6 +276,8 @@ public class StartRserve {
             StreamHog error = new StreamHog(p.getErrorStream(), (err != null));
             StreamHog output = new StreamHog(p.getInputStream(), (out != null));
           
+            if(rservefollower!=null)
+            	rservefollower.followProcess(p);
 
             if (err != null) {
                 error.join();
@@ -338,13 +346,15 @@ public class StartRserve {
         return true;
     }
 
+    
+    
     /** shortcut to <code>launchRserve(cmd, "--no-save --slave", "--no-save --slave", false)</code> */
-    public static boolean launchRserve(String cmd) {
-        return launchRserve(cmd, /*null,*/ "--no-save --slave", "--no-save --slave", false,null);
+    public static boolean launchRserve(String cmd, WinRserveProcFollower rservefollower) {
+        return launchRserve(cmd, /*null,*/ "--no-save --slave", "--no-save --slave", false,null,rservefollower);
     }
     
-    public static boolean launchRserve(String cmd,String R_USER_LIBS) {
-        return launchRserve(cmd, /*null,*/ "--no-save --slave", "--no-save --slave", false, R_USER_LIBS);
+    public static boolean launchRserve(String cmd,String R_USER_LIBS, WinRserveProcFollower rservefollower) {
+        return launchRserve(cmd, /*null,*/ "--no-save --slave", "--no-save --slave", false, R_USER_LIBS,rservefollower);
     }
 
     /** attempt to start Rserve. Note: parameters are <b>not</b> quoted, so avoid using any quotes in arguments
@@ -353,7 +363,7 @@ public class StartRserve {
     @param rsrvargs arguments to be passed to Rserve
     @return <code>true</code> if Rserve is running or was successfully started, <code>false</code> otherwise.
      */
-    public static boolean launchRserve(String cmd, /*String libloc,*/ String rargs, String rsrvargs, boolean debug, String R_USER_LIBS) {
+    public static boolean launchRserve(String cmd, /*String libloc,*/ String rargs, String rsrvargs, boolean debug, String R_USER_LIBS, WinRserveProcFollower rservefollower) {
         System.err.println("Waiting for Rserve to start ...");
         
 
@@ -361,9 +371,9 @@ public class StartRserve {
         boolean startRserve =false;
         
         if(R_USER_LIBS!=null)
-        	startRserve =doInR(".libPaths("+sep+R_USER_LIBS+sep+");library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null);
+        	startRserve =doInR(".libPaths("+sep+R_USER_LIBS+sep+");library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null,rservefollower);
         else
-        	startRserve =doInR("library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null);
+        	startRserve =doInR("library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null,rservefollower);
         
         //boolean startRserve = doInR("library(" + /*(libloc != null ? "lib.loc='" + libloc + "'," : "") +*/ "Rserve);Rserve(" + (debug ? "TRUE" : "FALSE") + ",args='" + rsrvargs + "')", cmd, rargs, null, null);
         if (startRserve) {
@@ -404,7 +414,7 @@ public class StartRserve {
 
     /** checks whether Rserve is running and if that's not the case it attempts to start it using the defaults for the platform where it is run on. 
     This method is meant to be set-and-forget and cover most default setups. For special setups you may get more control over R with <code>launchRserve</code> instead. */
-    public static boolean checkLocalRserve() {
+/*    public static boolean checkLocalRserve() {
         if (isRserveRunning()) {
             return true;
         }
@@ -429,14 +439,14 @@ public class StartRserve {
             return launchRserve(installPath + "\\bin\\R.exe");
         }
         return (launchRserve("R")
-                || /* try some common unix locations of R */ ((new File("/Library/Frameworks/R.framework/Resources/bin/R")).exists() && launchRserve("/Library/Frameworks/R.framework/Resources/bin/R"))
+                ||  try some common unix locations of R  ((new File("/Library/Frameworks/R.framework/Resources/bin/R")).exists() && launchRserve("/Library/Frameworks/R.framework/Resources/bin/R"))
                 || ((new File("/usr/local/lib/R/bin/R")).exists() && launchRserve("/usr/local/lib/R/bin/R"))
                 || ((new File("/usr/lib/R/bin/R")).exists() && launchRserve("/usr/lib/R/bin/R"))
                 || ((new File("/usr/local/bin/R")).exists() && launchRserve("/usr/local/bin/R"))
                 || ((new File("/sw/bin/R")).exists() && launchRserve("/sw/bin/R"))
                 || ((new File("/usr/common/bin/R")).exists() && launchRserve("/usr/common/bin/R"))
                 || ((new File("/opt/bin/R")).exists() && launchRserve("/opt/bin/R")));
-    }
+    }*/
 
     /** check whether Rserve is currently running (on local machine and default port).
     @return <code>true</code> if local Rserve instance is running, <code>false</code> otherwise
@@ -455,7 +465,7 @@ public class StartRserve {
 
     /** just a demo main method which starts Rserve and shuts it down again */
     public static void main(String[] args) {
-        System.err.println("result=" + checkLocalRserve());
+       // System.err.println("result=" + checkLocalRserve());
         try {
             RConnection c = new RConnection();
             c.shutdown();

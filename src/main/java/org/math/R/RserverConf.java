@@ -169,7 +169,10 @@ public class RserverConf {
         };
 
         try {
-            t.execute(CONNECT_TIMEOUT);
+        	 /*if (System.getProperty("os.name").contains("Win")) 
+        		 t.execute(3000);
+        	 else*/
+        		 t.execute(CONNECT_TIMEOUT);
         } catch (Exception e) {
             System.err.println("  failed: " + e.getMessage());
         }
@@ -235,12 +238,13 @@ public class RserverConf {
         return true;
     }
 
-    public static RserverConf newLocalInstance(Properties p) {
+    public synchronized static RserverConf newLocalInstance(Properties p) {
         RserverConf server = null;
         if (System.getProperty("os.name").contains("Win") || !Rsession.UNIX_OPTIMIZE) {
             while (!isPortAvailable(RserverPort)) {
                 RserverPort++;
             }
+            
             server = new RserverConf(null, RserverPort, null, null, p);
         } else { // Unix supports multi-sessions natively, so no need to open a different Rserve on a new port
 
